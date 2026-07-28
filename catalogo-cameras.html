@@ -319,8 +319,8 @@
     width:100%;
     text-align:center;
     font-family:'JetBrains Mono',monospace;
-    font-size:22px;
-    letter-spacing:10px;
+    font-size:17px;
+    letter-spacing:1px;
     background:var(--panel-raised);
     border:1px solid var(--border);
     border-radius:9px;
@@ -370,12 +370,12 @@
   <div class="lock-card">
     <div class="lock-icon">🔒</div>
     <h2 id="lock-title">Catálogo protegido</h2>
-    <div class="lock-sub" id="lock-sub">Crie um PIN para proteger o acesso.</div>
-    <input type="tel" inputmode="numeric" pattern="[0-9]*" maxlength="8" class="pin-input" id="pin-input" placeholder="••••">
-    <input type="tel" inputmode="numeric" pattern="[0-9]*" maxlength="8" class="pin-input" id="pin-input-confirm" placeholder="confirme o PIN" style="display:none;">
+    <div class="lock-sub" id="lock-sub">Crie uma senha para proteger o acesso.</div>
+    <input type="password" autocomplete="off" maxlength="64" class="pin-input" id="pin-input" placeholder="senha">
+    <input type="password" autocomplete="off" maxlength="64" class="pin-input" id="pin-input-confirm" placeholder="confirme a senha" style="display:none;">
     <div class="lock-error" id="lock-error"></div>
-    <button class="btn-accent" id="btn-lock-submit">Criar PIN</button>
-    <button class="lock-forgot" id="btn-forgot">esqueci o PIN / redefinir</button>
+    <button class="btn-accent" id="btn-lock-submit">Criar senha</button>
+    <button class="lock-forgot" id="btn-forgot">esqueci a senha / redefinir</button>
   </div>
 </div>
 
@@ -385,7 +385,7 @@
     <div class="header-actions">
       <div class="count-badge"><b id="total-count">0</b> registradas</div>
       <button class="icon-btn" id="btn-relock" title="Bloquear agora">🔒</button>
-      <button class="icon-btn" id="btn-change-pin" title="Trocar PIN">PIN</button>
+      <button class="icon-btn" id="btn-change-pin" title="Trocar senha">Senha</button>
     </div>
   </header>
 
@@ -493,27 +493,27 @@ function hideLockOverlay(){
 function renderLockUI(){
   const confirmField = $('pin-input-confirm');
   if(lockMode === 'setup'){
-    $('lock-title').textContent = 'Criar um PIN';
-    $('lock-sub').textContent = 'Só quem souber esse PIN vai poder abrir e editar o catálogo.';
+    $('lock-title').textContent = 'Criar uma senha';
+    $('lock-sub').textContent = 'Só quem souber essa senha vai poder abrir e editar o catálogo. Escolha algo único, com letras e números.';
     confirmField.style.display = 'block';
-    confirmField.placeholder = 'confirme o PIN';
-    $('btn-lock-submit').textContent = 'Criar PIN';
+    confirmField.placeholder = 'confirme a senha';
+    $('btn-lock-submit').textContent = 'Criar senha';
   }else if(lockMode === 'enter'){
     $('lock-title').textContent = 'Catálogo protegido';
-    $('lock-sub').textContent = 'Digite o PIN para continuar.';
+    $('lock-sub').textContent = 'Digite a senha para continuar.';
     confirmField.style.display = 'none';
     $('btn-lock-submit').textContent = 'Entrar';
   }else if(lockMode === 'change-verify'){
-    $('lock-title').textContent = 'Trocar PIN';
-    $('lock-sub').textContent = 'Digite o PIN atual.';
+    $('lock-title').textContent = 'Trocar senha';
+    $('lock-sub').textContent = 'Digite a senha atual.';
     confirmField.style.display = 'none';
     $('btn-lock-submit').textContent = 'Continuar';
   }else if(lockMode === 'change-new'){
-    $('lock-title').textContent = 'Novo PIN';
-    $('lock-sub').textContent = 'Digite o novo PIN e confirme.';
+    $('lock-title').textContent = 'Nova senha';
+    $('lock-sub').textContent = 'Digite a nova senha e confirme.';
     confirmField.style.display = 'block';
-    confirmField.placeholder = 'confirme o novo PIN';
-    $('btn-lock-submit').textContent = 'Salvar novo PIN';
+    confirmField.placeholder = 'confirme a nova senha';
+    $('btn-lock-submit').textContent = 'Salvar nova senha';
   }
   $('pin-input').value = '';
   confirmField.value = '';
@@ -534,14 +534,13 @@ $('btn-lock-submit').addEventListener('click', async () => {
   const confirmVal = $('pin-input-confirm').value.trim();
   const err = $('lock-error');
 
-  if(val.length < 4){
-    err.textContent = 'O PIN precisa ter pelo menos 4 dígitos.';
-    return;
-  }
-
   if(lockMode === 'setup'){
+    if(val.length < 6){
+      err.textContent = 'A senha precisa ter pelo menos 6 caracteres.';
+      return;
+    }
     if(val !== confirmVal){
-      err.textContent = 'Os PINs não coincidem.';
+      err.textContent = 'As senhas não coincidem.';
       return;
     }
     storedPinHash = await sha256(val);
@@ -551,7 +550,7 @@ $('btn-lock-submit').addEventListener('click', async () => {
   }else if(lockMode === 'enter'){
     const h = await sha256(val);
     if(h !== storedPinHash){
-      err.textContent = 'PIN incorreto.';
+      err.textContent = 'Senha incorreta.';
       $('pin-input').value = '';
       return;
     }
@@ -560,20 +559,24 @@ $('btn-lock-submit').addEventListener('click', async () => {
   }else if(lockMode === 'change-verify'){
     const h = await sha256(val);
     if(h !== storedPinHash){
-      err.textContent = 'PIN atual incorreto.';
+      err.textContent = 'Senha atual incorreta.';
       return;
     }
     lockMode = 'change-new';
     renderLockUI();
   }else if(lockMode === 'change-new'){
+    if(val.length < 6){
+      err.textContent = 'A senha precisa ter pelo menos 6 caracteres.';
+      return;
+    }
     if(val !== confirmVal){
-      err.textContent = 'Os PINs não coincidem.';
+      err.textContent = 'As senhas não coincidem.';
       return;
     }
     storedPinHash = await sha256(val);
     setStoredPinHash(storedPinHash);
     hideLockOverlay();
-    showToast('PIN atualizado.');
+    showToast('Senha atualizada.');
   }
 });
 
@@ -584,7 +587,7 @@ $('btn-lock-submit').addEventListener('click', async () => {
 });
 
 $('btn-forgot').addEventListener('click', () => {
-  if(!confirm('Isso vai apagar o PIN atual e você poderá criar um novo. O catálogo salvo não será apagado. Continuar?')) return;
+  if(!confirm('Isso vai apagar a senha atual e você poderá criar uma nova. O catálogo salvo não será apagado. Continuar?')) return;
   setStoredPinHash(null);
   storedPinHash = null;
   lockMode = 'setup';
