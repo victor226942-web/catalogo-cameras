@@ -219,7 +219,7 @@
     color:var(--text-faint);
     margin-top:4px;
   }
-  .entry .del{
+  .entry .del, .entry .edit{
     background:transparent;
     border:1px solid var(--border);
     color:var(--text-faint);
@@ -228,6 +228,28 @@
     border-radius:7px;
   }
   .entry .del:hover{color:var(--danger);border-color:var(--danger);}
+  .entry .edit:hover{color:var(--accent);border-color:var(--accent);}
+
+  .edit-banner{
+    margin-top:8px;
+    font-size:12px;
+    color:var(--accent);
+    display:none;
+    align-items:center;
+    justify-content:space-between;
+    gap:8px;
+    background:var(--accent-dim);
+    border:1px solid var(--accent);
+    border-radius:8px;
+    padding:8px 10px;
+  }
+  .edit-banner button{
+    padding:4px 9px;
+    font-size:11px;
+    background:transparent;
+    border-color:var(--accent);
+    color:var(--accent);
+  }
 
   .toolbar{
     display:flex;
@@ -282,7 +304,10 @@
       <label for="f-serial">Número de série</label>
       <input type="text" id="f-serial" placeholder="Ex: G25A34567" maxlength="9">
       <div class="duplicate-warn" id="format-warn">⚠ Formato esperado: G25A + 5 números (ex: G25A34567).</div>
-      <div class="duplicate-warn" id="dup-warn">⚠ Já existe um registro com esse número de série.</div>
+      <div class="edit-banner" id="edit-banner">
+        <span>Editando registro já catalogado</span>
+        <button id="btn-cancel-edit" type="button">cancelar</button>
+      </div>
 
       <label for="f-marca">Marca / Modelo</label>
       <input type="text" id="f-marca" placeholder="Ex: Hikvision DS-2CD2143">
@@ -376,9 +401,12 @@ function render(filter){
       <div>
         <div class="serial">${escapeHtml(e.serial)}</div>
         ${metaParts ? `<div class="meta">${escapeHtml(metaParts)}</div>` : ''}
-        <div class="ts">${fmtTs(e.ts)}</div>
+        <div class="ts">${fmtTs(e.ts)}${e.updatedTs ? ' · editado ' + fmtTs(e.updatedTs) : ''}</div>
       </div>
-      <button class="del" data-id="${e.id}">remover</button>
+      <div style="display:flex;flex-direction:column;gap:6px;">
+        <button class="edit" data-id="${e.id}">editar</button>
+        <button class="del" data-id="${e.id}">remover</button>
+      </div>
     </div>`;
   }).join('');
 
@@ -386,8 +414,18 @@ function render(filter){
     btn.addEventListener('click', () => {
       const id = btn.getAttribute('data-id');
       entries = entries.filter(e => e.id !== id);
+      if(editingId === id) exitEditMode();
       persistEntries();
       render();
+    });
+  });
+
+  log.querySelectorAll('.edit').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-id');
+      const entry = entries.find(e => e.id === id);
+      if(entry) enterEditMode(entry);
+      window.scrollTo({top:0, behavior:'smooth'});
     });
   });
 }
@@ -406,14 +444,49 @@ function checkFormat(){
   return !bad;
 }
 
-function checkDuplicate(){
-  const val = $('f-serial').value.trim();
-  const dup = val && entries.some(e => e.serial.toLowerCase() === val.toLowerCase());
-  $('dup-warn').style.display = dup ? 'block' : 'none';
-  return dup;
+let editingId = null;
+
+function findBySerial(serial){
+  const val = (serial || '').trim().toLowerCase();
+  if(!val) return null;
+  return entries.find(e => e.serial.toLowerCase() === val) || null;
 }
 
-$('f-serial').addEventListener('input', () => { checkFormat(); checkDuplicate(); });
+function enterEditMode(entry){
+  editingId = entry.id;
+  $('f-serial').value = entry.serial;
+  $('f-marca').value = entry.marca || '';
+  $('f-local').value = entry.local || '';
+  $('edit-banner').style.display = 'flex';
+  $('btn-save').textContent = 'Atualizar registro';
+}
+
+function exitEditMode(){
+  editingId = null;
+  $('edit-banner').style.display = 'none';
+  $('btn-save').textContent = 'Salvar no catálogo';
+}
+
+// Called whenever the serial field changes (by scan or typing): if it matches
+// an existing record, load that record for editing; otherwise stay in add mode.
+function syncFormWithSerial(){
+  const serial = $('f-serial').value.trim();
+  const match = findBySerial(serial);
+  if(match){
+    if(editingId !== match.id) enterEditMode(match);
+  }else if(editingId){
+    exitEditMode();
+  }
+}
+
+$('f-serial').addEventListener('input', () => { checkFormat(); syncFormWithSerial(); });
+
+$('btn-cancel-edit').addEventListener('click', () => {
+  exitEditMode();
+  $('f-serial').value = '';
+  $('f-marca').value = '';
+  $('f-local').value = '';
+});
 
 $('btn-save').addEventListener('click', () => {
   const serial = $('f-serial').value.trim();
@@ -421,28 +494,51 @@ $('btn-save').addEventListener('click', () => {
     showToast('Digite ou escaneie um número de série primeiro.');
     return;
   }
-  const entry = {
-    id: Date.now().toString(36) + Math.random().toString(36).slice(2,7),
-    serial,
-    marca: $('f-marca').value.trim(),
-    local: $('f-local').value.trim(),
-    ts: new Date().toISOString()
-  };
-  entries.push(entry);
+  const marca = $('f-marca').value.trim();
+  const local = $('f-local').value.trim();
+
+  if(editingId){
+    const entry = entries.find(e => e.id === editingId);
+    if(entry){
+      entry.serial = serial;
+      entry.marca = marca;
+      entry.local = local;
+      entry.updatedTs = new Date().toISOString();
+    }
+    showToast('Registro atualizado.');
+  }else{
+    const existing = findBySerial(serial);
+    if(existing){
+      // safety net: serial matched an existing record without triggering sync
+      existing.marca = marca || existing.marca;
+      existing.local = local || existing.local;
+      existing.updatedTs = new Date().toISOString();
+      showToast('Já existia — registro atualizado.');
+    }else{
+      entries.push({
+        id: Date.now().toString(36) + Math.random().toString(36).slice(2,7),
+        serial, marca, local,
+        ts: new Date().toISOString()
+      });
+      showToast('Câmera salva no catálogo.');
+    }
+  }
+
   persistEntries();
+  exitEditMode();
   $('f-serial').value = '';
   $('f-marca').value = '';
   $('f-local').value = '';
-  $('dup-warn').style.display = 'none';
+  $('format-warn').style.display = 'none';
   render();
-  showToast('Câmera salva no catálogo.');
 });
 
 $('btn-clear').addEventListener('click', () => {
+  exitEditMode();
   $('f-serial').value = '';
   $('f-marca').value = '';
   $('f-local').value = '';
-  $('dup-warn').style.display = 'none';
+  $('format-warn').style.display = 'none';
 });
 
 $('search').addEventListener('input', () => render());
@@ -541,9 +637,9 @@ function startScanner(){
     if(!SERIAL_FORMAT.test(code)) return;
     $('f-serial').value = code;
     checkFormat();
-    checkDuplicate();
+    syncFormWithSerial();
     if(navigator.vibrate) navigator.vibrate(80);
-    showToast('Código lido: ' + code);
+    showToast(findBySerial(code) ? 'Já catalogada — editando: ' + code : 'Código lido: ' + code);
   });
 }
 
