@@ -280,7 +280,8 @@
       </div>
 
       <label for="f-serial">Número de série</label>
-      <input type="text" id="f-serial" placeholder="Detectado automaticamente ou digite">
+      <input type="text" id="f-serial" placeholder="Ex: G25A34567" maxlength="9">
+      <div class="duplicate-warn" id="format-warn">⚠ Formato esperado: G25A + 5 números (ex: G25A34567).</div>
       <div class="duplicate-warn" id="dup-warn">⚠ Já existe um registro com esse número de série.</div>
 
       <label for="f-marca">Marca / Modelo</label>
@@ -395,6 +396,16 @@ function escapeHtml(s){
   return (s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
+// Serial format: fixed "G25A" prefix + 5 digits that vary (e.g. G25A34567)
+const SERIAL_FORMAT = /^G25A\d{5}$/i;
+
+function checkFormat(){
+  const val = $('f-serial').value.trim();
+  const bad = val && !SERIAL_FORMAT.test(val);
+  $('format-warn').style.display = bad ? 'block' : 'none';
+  return !bad;
+}
+
 function checkDuplicate(){
   const val = $('f-serial').value.trim();
   const dup = val && entries.some(e => e.serial.toLowerCase() === val.toLowerCase());
@@ -402,7 +413,7 @@ function checkDuplicate(){
   return dup;
 }
 
-$('f-serial').addEventListener('input', checkDuplicate);
+$('f-serial').addEventListener('input', () => { checkFormat(); checkDuplicate(); });
 
 $('btn-save').addEventListener('click', () => {
   const serial = $('f-serial').value.trim();
@@ -516,14 +527,20 @@ function startScanner(){
   });
 
   Quagga.onDetected(function(result){
-    const code = result && result.codeResult && result.codeResult.code;
-    if(!code) return;
+    const raw = result && result.codeResult && result.codeResult.code;
+    if(!raw) return;
+    const code = raw.trim().toUpperCase();
     const now = Date.now();
-    // debounce repeated reads of the same code
+    // debounce repeated reads of the same code (accepted or rejected)
     if(code === lastDetectedCode && (now - lastDetectedTime) < 2000) return;
     lastDetectedCode = code;
     lastDetectedTime = now;
+    // reject reads that don't match the known serial format (G25A + 5 digits) —
+    // a garbled 1D decode is a much more likely explanation than a real serial
+    // outside the expected pattern, so drop it instead of polluting the field
+    if(!SERIAL_FORMAT.test(code)) return;
     $('f-serial').value = code;
+    checkFormat();
     checkDuplicate();
     if(navigator.vibrate) navigator.vibrate(80);
     showToast('Código lido: ' + code);
