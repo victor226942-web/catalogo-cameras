@@ -276,6 +276,7 @@
       </div>
       <div class="btn-row">
         <button class="btn-accent" id="btn-toggle-scan">Ligar câmera</button>
+        <button id="btn-torch" style="display:none;flex:0 0 auto;">🔦</button>
       </div>
 
       <label for="f-serial">Número de série</label>
@@ -467,15 +468,18 @@ function startScanner(){
       target: container,
       constraints:{
         facingMode:'environment',
-        width:{ideal:1280},
-        height:{ideal:960}
-      }
+        width:{ideal:1920},
+        height:{ideal:1080}
+      },
+      // restrict processing to the viewfinder box: cheaper per frame (higher
+      // effective scan rate) and matches what the user actually aims at
+      area:{top:'33%', right:'11%', left:'11%', bottom:'33%'}
     },
-    locator:{patchSize:'medium', halfSample:true},
+    locator:{patchSize:'medium', halfSample:false},
     numOfWorkers: 0,
     frequency: 10,
     decoder:{
-      readers:['code_128_reader','ean_reader','ean_8_reader','code_39_reader','codabar_reader','upc_reader']
+      readers:['code_128_reader','ean_reader','ean_8_reader','code_39_reader','codabar_reader','upc_reader','upc_e_reader','code_93_reader']
     },
     locate:true
   }, function(err){
@@ -492,6 +496,8 @@ function startScanner(){
     $('scanner-off').style.display='none';
     $('viewfinder').style.display='flex';
     $('btn-toggle-scan').textContent = 'Desligar câmera';
+    setupTorchButton();
+    setupContinuousFocus();
   });
 
   Quagga.onProcessed(function(result){
@@ -531,6 +537,52 @@ function stopScanner(){
   $('scanner-off').innerHTML = '<span>Câmera desligada</span>';
   $('viewfinder').style.display='none';
   $('btn-toggle-scan').textContent = 'Ligar câmera';
+  $('btn-torch').style.display = 'none';
+  $('btn-torch').textContent = '🔦';
+}
+
+function getActiveVideoTrack(){
+  try{
+    const video = $('scanner-container').querySelector('video');
+    return video && video.srcObject ? video.srcObject.getVideoTracks()[0] : null;
+  }catch(e){
+    return null;
+  }
+}
+
+// Best-effort: keep autofocus continuously hunting instead of locking on the
+// first frame, which otherwise leaves close-up barcodes permanently blurry.
+// Not supported on iOS Safari; fails silently there.
+function setupContinuousFocus(){
+  const track = getActiveVideoTrack();
+  if(!track) return;
+  const caps = track.getCapabilities ? track.getCapabilities() : {};
+  if(caps.focusMode && caps.focusMode.includes('continuous')){
+    track.applyConstraints({advanced:[{focusMode:'continuous'}]}).catch(()=>{});
+  }
+}
+
+// Flashlight toggle, only shown when the device actually reports torch support
+// (mostly Android Chrome; iOS Safari never does).
+function setupTorchButton(){
+  const track = getActiveVideoTrack();
+  const btn = $('btn-torch');
+  const caps = track && track.getCapabilities ? track.getCapabilities() : {};
+  if(!track || !caps.torch){
+    btn.style.display = 'none';
+    return;
+  }
+  let torchOn = false;
+  btn.style.display = 'block';
+  btn.textContent = '🔦';
+  btn.onclick = () => {
+    torchOn = !torchOn;
+    track.applyConstraints({advanced:[{torch:torchOn}]}).catch(()=>{
+      showToast('Não foi possível ligar a lanterna.');
+      torchOn = !torchOn;
+    });
+    btn.textContent = torchOn ? '🔦 ligada' : '🔦';
+  };
 }
 
 $('btn-toggle-scan').addEventListener('click', () => {
