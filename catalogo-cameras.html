@@ -472,7 +472,7 @@ function startScanner(){
       }
     },
     locator:{patchSize:'medium', halfSample:true},
-    numOfWorkers: 2,
+    numOfWorkers: 0,
     frequency: 10,
     decoder:{
       readers:['code_128_reader','ean_reader','ean_8_reader','code_39_reader','codabar_reader','upc_reader']
@@ -492,6 +492,21 @@ function startScanner(){
     $('scanner-off').style.display='none';
     $('viewfinder').style.display='flex';
     $('btn-toggle-scan').textContent = 'Desligar câmera';
+  });
+
+  Quagga.onProcessed(function(result){
+    const ctx = Quagga.canvas && Quagga.canvas.ctx.overlay;
+    const canvas = Quagga.canvas && Quagga.canvas.dom.overlay;
+    if(!ctx || !canvas || !result) return;
+    ctx.clearRect(0, 0, parseInt(canvas.getAttribute('width')), parseInt(canvas.getAttribute('height')));
+    if(result.boxes){
+      result.boxes.filter(box => box !== result.box).forEach(box => {
+        Quagga.ImageDebug.drawPath(box, {x:0, y:1}, ctx, {color:'#F2A65A', lineWidth:2});
+      });
+    }
+    if(result.box){
+      Quagga.ImageDebug.drawPath(result.box, {x:0, y:1}, ctx, {color:'#4FD8C4', lineWidth:2});
+    }
   });
 
   Quagga.onDetected(function(result){
