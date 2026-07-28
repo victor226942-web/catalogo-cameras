@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Catálogo de Câmeras</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
+<style>
+  :root{
+    --bg:#12161B;
+    --panel:#1B2027;
+    --panel-raised:#20262E;
+    --border:#2A323C;
+    --accent:#4FD8C4;
+    --accent-dim:#2E5C56;
+    --warn:#F2A65A;
+    --danger:#E2685B;
+    --text:#ECEFF3;
+    --text-dim:#8B95A3;
+    --text-faint:#5B6472;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--text);
+    font-family:'Inter',sans-serif;
+    min-height:100vh;
+  }
+  .wrap{
+    max-width:1100px;
+    margin:0 auto;
+    padding:20px 16px 60px;
+  }
+  header{
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    gap:12px;
+    margin-bottom:18px;
+    flex-wrap:wrap;
+  }
+  h1{
+    font-family:'Space Grotesk',sans-serif;
+    font-size:22px;
+    font-weight:700;
+    margin:0;
+    letter-spacing:-0.02em;
+  }
+  .count-badge{
+    font-family:'JetBrains Mono',monospace;
+    font-size:12px;
+    color:var(--text-dim);
+    background:var(--panel);
+    border:1px solid var(--border);
+    border-radius:20px;
+    padding:5px 12px;
+  }
+  .count-badge b{color:var(--accent);font-weight:600;}
+
+  .grid{
+    display:grid;
+    grid-template-columns:1fr;
+    gap:16px;
+  }
+  @media(min-width:820px){
+    .grid{grid-template-columns: 380px 1fr;align-items:start;}
+  }
+
+  .panel{
+    background:var(--panel);
+    border:1px solid var(--border);
+    border-radius:14px;
+    padding:16px;
+  }
+  .panel h2{
+    font-family:'Space Grotesk',sans-serif;
+    font-size:13px;
+    text-transform:uppercase;
+    letter-spacing:0.08em;
+    color:var(--text-dim);
+    margin:0 0 12px 0;
+  }
+
+  /* scanner */
+  #scanner-container{
+    position:relative;
+    width:100%;
+    aspect-ratio:4/3;
+    background:#000;
+    border-radius:10px;
+    overflow:hidden;
+    border:1px solid var(--border);
+  }
+  #scanner-container video, #scanner-container canvas{
+    position:absolute;
+    top:0;left:0;width:100%;height:100%;object-fit:cover;
+  }
+  .viewfinder{
+    position:absolute;
+    inset:0;
+    pointer-events:none;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .viewfinder .box{
+    width:78%;
+    height:34%;
+    border:2px solid var(--accent);
+    border-radius:8px;
+    box-shadow:0 0 0 999px rgba(0,0,0,0.35);
+    position:relative;
+    overflow:hidden;
+  }
+  .viewfinder .scanline{
+    position:absolute;
+    left:0;right:0;
+    height:2px;
+    background:var(--accent);
+    box-shadow:0 0 8px var(--accent);
+    animation:scan 1.6s ease-in-out infinite;
+  }
+  @keyframes scan{
+    0%{top:6%;}
+    50%{top:88%;}
+    100%{top:6%;}
+  }
+  .scanner-off{
+    position:absolute;inset:0;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:10px;color:var(--text-faint);font-size:13px;text-align:center;padding:20px;
+  }
+
+  button{
+    font-family:'Inter',sans-serif;
+    font-weight:600;
+    font-size:14px;
+    border-radius:9px;
+    border:1px solid var(--border);
+    background:var(--panel-raised);
+    color:var(--text);
+    padding:11px 14px;
+    cursor:pointer;
+  }
+  button:active{transform:translateY(1px);}
+  .btn-accent{
+    background:var(--accent);
+    border-color:var(--accent);
+    color:#0B1512;
+  }
+  .btn-row{display:flex;gap:8px;margin-top:10px;}
+  .btn-row button{flex:1;}
+
+  label{
+    display:block;
+    font-size:12px;
+    color:var(--text-dim);
+    margin:12px 0 5px;
+  }
+  input[type=text]{
+    width:100%;
+    background:var(--panel-raised);
+    border:1px solid var(--border);
+    border-radius:8px;
+    padding:10px 11px;
+    color:var(--text);
+    font-family:'JetBrains Mono',monospace;
+    font-size:14px;
+  }
+  input[type=text]:focus{outline:none;border-color:var(--accent);}
+  input#f-modelo, input#f-marca, input#f-local{font-family:'Inter',sans-serif;font-size:14px;}
+
+  .duplicate-warn{
+    margin-top:8px;
+    font-size:12px;
+    color:var(--warn);
+    display:none;
+  }
+
+  /* log / catalog */
+  .log-empty{
+    color:var(--text-faint);
+    font-size:14px;
+    padding:30px 10px;
+    text-align:center;
+    line-height:1.6;
+  }
+  .entry{
+    display:grid;
+    grid-template-columns:44px 1fr auto;
+    gap:12px;
+    align-items:start;
+    padding:12px 4px;
+    border-bottom:1px solid var(--border);
+  }
+  .entry:last-child{border-bottom:none;}
+  .entry .idx{
+    font-family:'JetBrains Mono',monospace;
+    color:var(--text-faint);
+    font-size:12px;
+    padding-top:2px;
+  }
+  .entry .serial{
+    font-family:'JetBrains Mono',monospace;
+    font-size:15px;
+    color:var(--accent);
+    font-weight:600;
+    letter-spacing:0.01em;
+  }
+  .entry .meta{
+    font-size:12.5px;
+    color:var(--text-dim);
+    margin-top:3px;
+  }
+  .entry .ts{
+    font-family:'JetBrains Mono',monospace;
+    font-size:11px;
+    color:var(--text-faint);
+    margin-top:4px;
+  }
+  .entry .del{
+    background:transparent;
+    border:1px solid var(--border);
+    color:var(--text-faint);
+    font-size:12px;
+    padding:6px 10px;
+    border-radius:7px;
+  }
+  .entry .del:hover{color:var(--danger);border-color:var(--danger);}
+
+  .toolbar{
+    display:flex;
+    gap:8px;
+    margin-bottom:12px;
+    flex-wrap:wrap;
+  }
+  .toolbar input[type=text]{flex:1;min-width:140px;}
+  .toolbar button{white-space:nowrap;}
+
+  .toast{
+    position:fixed;
+    bottom:20px;left:50%;
+    transform:translateX(-50%) translateY(10px);
+    background:var(--panel-raised);
+    border:1px solid var(--accent);
+    color:var(--text);
+    padding:10px 16px;
+    border-radius:9px;
+    font-size:13px;
+    opacity:0;
+    pointer-events:none;
+    transition:opacity 0.2s, transform 0.2s;
+    z-index:99;
+  }
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Catálogo de Câmeras</h1>
+    <div class="count-badge"><b id="total-count">0</b> registradas</div>
+  </header>
+
+  <div class="grid">
+    <div class="panel">
+      <h2>Ler código de barras</h2>
+      <div id="scanner-container">
+        <div id="scanner-off" class="scanner-off">
+          <span>Câmera desligada</span>
+        </div>
+        <div class="viewfinder" id="viewfinder" style="display:none;">
+          <div class="box"><div class="scanline"></div></div>
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn-accent" id="btn-toggle-scan">Ligar câmera</button>
+      </div>
+
+      <label for="f-serial">Número de série</label>
+      <input type="text" id="f-serial" placeholder="Detectado automaticamente ou digite">
+      <div class="duplicate-warn" id="dup-warn">⚠ Já existe um registro com esse número de série.</div>
+
+      <label for="f-marca">Marca / Modelo</label>
+      <input type="text" id="f-marca" placeholder="Ex: Hikvision DS-2CD2143">
+
+      <label for="f-local">Local / observação</label>
+      <input type="text" id="f-local" placeholder="Ex: Poste Av. 15 de Novembro, esquina X">
+
+      <div class="btn-row">
+        <button class="btn-accent" id="btn-save" style="flex:2;">Salvar no catálogo</button>
+        <button id="btn-clear">Limpar</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Registros</h2>
+      <div class="toolbar">
+        <input type="text" id="search" placeholder="Buscar por série, marca ou local...">
+        <button id="btn-export">Exportar CSV</button>
+      </div>
+      <div id="log"></div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const STORAGE_KEY = 'cameras-catalog-v1';
+let entries = [];
+let scanning = false;
+let lastDetectedCode = '';
+let lastDetectedTime = 0;
+
+const $ = (id) => document.getElementById(id);
+
+function showToast(msg){
+  const t = $('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'), 1800);
+}
+
+function loadEntries(){
+  try{
+    const raw = localStorage.getItem(STORAGE_KEY);
+    entries = raw ? JSON.parse(raw) : [];
+  }catch(e){
+    entries = [];
+  }
+  render();
+}
+
+function persistEntries(){
+  try{
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+  }catch(e){
+    showToast('Erro ao salvar. Tente novamente.');
+  }
+}
+
+function fmtTs(iso){
+  const d = new Date(iso);
+  return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
+}
+
+function render(filter){
+  const log = $('log');
+  const q = (filter || $('search').value || '').trim().toLowerCase();
+  const filtered = entries.filter(e => {
+    if(!q) return true;
+    return (e.serial+' '+e.marca+' '+e.local).toLowerCase().includes(q);
+  });
+
+  $('total-count').textContent = entries.length;
+
+  if(entries.length === 0){
+    log.innerHTML = '<div class="log-empty">Nenhuma câmera catalogada ainda.<br>Escaneie um código de barras ou digite o número de série ao lado.</div>';
+    return;
+  }
+  if(filtered.length === 0){
+    log.innerHTML = '<div class="log-empty">Nada encontrado para essa busca.</div>';
+    return;
+  }
+
+  const sorted = filtered.slice().reverse();
+  log.innerHTML = sorted.map((e) => {
+    const idx = entries.indexOf(e) + 1;
+    const metaParts = [e.marca, e.local].filter(Boolean).join(' · ');
+    return `<div class="entry" data-id="${e.id}">
+      <div class="idx">#${String(idx).padStart(3,'0')}</div>
+      <div>
+        <div class="serial">${escapeHtml(e.serial)}</div>
+        ${metaParts ? `<div class="meta">${escapeHtml(metaParts)}</div>` : ''}
+        <div class="ts">${fmtTs(e.ts)}</div>
+      </div>
+      <button class="del" data-id="${e.id}">remover</button>
+    </div>`;
+  }).join('');
+
+  log.querySelectorAll('.del').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-id');
+      entries = entries.filter(e => e.id !== id);
+      persistEntries();
+      render();
+    });
+  });
+}
+
+function escapeHtml(s){
+  return (s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function checkDuplicate(){
+  const val = $('f-serial').value.trim();
+  const dup = val && entries.some(e => e.serial.toLowerCase() === val.toLowerCase());
+  $('dup-warn').style.display = dup ? 'block' : 'none';
+  return dup;
+}
+
+$('f-serial').addEventListener('input', checkDuplicate);
+
+$('btn-save').addEventListener('click', () => {
+  const serial = $('f-serial').value.trim();
+  if(!serial){
+    showToast('Digite ou escaneie um número de série primeiro.');
+    return;
+  }
+  const entry = {
+    id: Date.now().toString(36) + Math.random().toString(36).slice(2,7),
+    serial,
+    marca: $('f-marca').value.trim(),
+    local: $('f-local').value.trim(),
+    ts: new Date().toISOString()
+  };
+  entries.push(entry);
+  persistEntries();
+  $('f-serial').value = '';
+  $('f-marca').value = '';
+  $('f-local').value = '';
+  $('dup-warn').style.display = 'none';
+  render();
+  showToast('Câmera salva no catálogo.');
+});
+
+$('btn-clear').addEventListener('click', () => {
+  $('f-serial').value = '';
+  $('f-marca').value = '';
+  $('f-local').value = '';
+  $('dup-warn').style.display = 'none';
+});
+
+$('search').addEventListener('input', () => render());
+
+$('btn-export').addEventListener('click', () => {
+  if(entries.length === 0){
+    showToast('Nada para exportar ainda.');
+    return;
+  }
+  const header = 'Numero de Serie,Marca/Modelo,Local/Observacao,Data\n';
+  const rows = entries.map(e => {
+    const cells = [e.serial, e.marca, e.local, fmtTs(e.ts)].map(v => `"${(v||'').replace(/"/g,'""')}"`);
+    return cells.join(',');
+  });
+  const csv = header + rows.join('\n');
+  const blob = new Blob(["\uFEFF" + csv], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'catalogo-cameras.csv';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+});
+
+// --- Quagga barcode scanning ---
+function startScanner(){
+  const container = $('scanner-container');
+  Quagga.init({
+    inputStream:{
+      name:'Live',
+      type:'LiveStream',
+      target: container,
+      constraints:{
+        facingMode:'environment',
+        width:{ideal:1280},
+        height:{ideal:960}
+      }
+    },
+    locator:{patchSize:'medium', halfSample:true},
+    numOfWorkers: 2,
+    frequency: 10,
+    decoder:{
+      readers:['code_128_reader','ean_reader','ean_8_reader','code_39_reader','codabar_reader','upc_reader']
+    },
+    locate:true
+  }, function(err){
+    if(err){
+      console.error(err);
+      $('scanner-off').style.display='flex';
+      $('scanner-off').innerHTML = '<span>Não foi possível acessar a câmera.<br>Verifique a permissão do navegador.</span>';
+      scanning = false;
+      $('btn-toggle-scan').textContent = 'Ligar câmera';
+      return;
+    }
+    Quagga.start();
+    scanning = true;
+    $('scanner-off').style.display='none';
+    $('viewfinder').style.display='flex';
+    $('btn-toggle-scan').textContent = 'Desligar câmera';
+  });
+
+  Quagga.onDetected(function(result){
+    const code = result && result.codeResult && result.codeResult.code;
+    if(!code) return;
+    const now = Date.now();
+    // debounce repeated reads of the same code
+    if(code === lastDetectedCode && (now - lastDetectedTime) < 2000) return;
+    lastDetectedCode = code;
+    lastDetectedTime = now;
+    $('f-serial').value = code;
+    checkDuplicate();
+    if(navigator.vibrate) navigator.vibrate(80);
+    showToast('Código lido: ' + code);
+  });
+}
+
+function stopScanner(){
+  try{ Quagga.stop(); }catch(e){}
+  scanning = false;
+  $('scanner-off').style.display='flex';
+  $('scanner-off').innerHTML = '<span>Câmera desligada</span>';
+  $('viewfinder').style.display='none';
+  $('btn-toggle-scan').textContent = 'Ligar câmera';
+}
+
+$('btn-toggle-scan').addEventListener('click', () => {
+  if(scanning) stopScanner();
+  else startScanner();
+});
+
+loadEntries();
+</script>
+</body>
+</html>
