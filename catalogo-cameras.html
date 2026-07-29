@@ -522,6 +522,9 @@
 
       <details class="extra-fields" id="extra-fields">
         <summary>Mais dados da etiqueta (opcional)</summary>
+        <label for="f-linha">Linha do produto</label>
+        <input type="text" id="f-linha" placeholder="Ex: DashCam">
+
         <label for="f-verification">Verification Code</label>
         <input type="text" id="f-verification" placeholder="Ex: PRJQOP">
 
@@ -531,11 +534,32 @@
         <label for="f-lot">Lot Number</label>
         <input type="text" id="f-lot" placeholder="Ex: 26275411">
 
+        <label for="f-internal">Código interno (abaixo do lote)</label>
+        <input type="text" id="f-internal" placeholder="Ex: 3000630070/20">
+
         <label for="f-date">Data de fabricação</label>
         <input type="text" id="f-date" placeholder="Ex: 06/2025">
 
         <label for="f-imei">IMEI</label>
         <input type="text" id="f-imei" placeholder="Ex: 866496078906506">
+      </details>
+
+      <details class="extra-fields" id="extra-fields-2">
+        <summary>Fabricante e homologação (opcional)</summary>
+        <label for="f-anatel">Anatel</label>
+        <input type="text" id="f-anatel" placeholder="Ex: 07471-25-04444">
+
+        <label for="f-icasa">ICASA</label>
+        <input type="text" id="f-icasa" placeholder="Ex: TA-2025/2217">
+
+        <label for="f-fabricante">Fabricante</label>
+        <input type="text" id="f-fabricante" placeholder="Ex: Hangzhou HikAuto Technology Co., Ltd.">
+
+        <label for="f-endereco">Endereço do fabricante</label>
+        <input type="text" id="f-endereco" placeholder="Ex: Room 309, Floor B, Building 2...">
+
+        <label for="f-origem">Origem</label>
+        <input type="text" id="f-origem" placeholder="Ex: Made in China">
       </details>
 
       <div class="btn-row">
@@ -750,7 +774,7 @@ function render(filter){
   const q = (filter || $('search').value || '').trim().toLowerCase();
   const filtered = entries.filter(e => {
     if(!q) return true;
-    const haystack = [e.serial, e.marca, e.local, e.lotNumber, e.imei, e.materialCode, e.verificationCode].filter(Boolean).join(' ');
+    const haystack = [e.serial, e.marca, e.linha, e.local, e.lotNumber, e.imei, e.materialCode, e.verificationCode, e.anatel, e.icasa, e.fabricante].filter(Boolean).join(' ');
     return haystack.toLowerCase().includes(q);
   });
 
@@ -768,13 +792,16 @@ function render(filter){
   const sorted = filtered.slice().reverse();
   log.innerHTML = sorted.map((e) => {
     const idx = entries.indexOf(e) + 1;
-    const metaParts = [e.marca, e.local].filter(Boolean).join(' · ');
+    const metaParts = [e.marca, e.linha, e.local].filter(Boolean).join(' · ');
     const extraParts = [
       e.materialCode ? 'Material: ' + e.materialCode : '',
       e.lotNumber ? 'Lote: ' + e.lotNumber : '',
       e.verificationCode ? 'Verif: ' + e.verificationCode : '',
       e.dataFabricacao ? 'Fab: ' + e.dataFabricacao : '',
-      e.imei ? 'IMEI: ' + e.imei : ''
+      e.imei ? 'IMEI: ' + e.imei : '',
+      e.anatel ? 'Anatel: ' + e.anatel : '',
+      e.icasa ? 'ICASA: ' + e.icasa : '',
+      e.origem ? e.origem : ''
     ].filter(Boolean).join(' · ');
     return `<div class="entry" data-id="${e.id}">
       <div class="idx">#${String(idx).padStart(3,'0')}</div>
@@ -829,7 +856,14 @@ const EXTRA_FIELD_MAP = [
   ['f-material', 'materialCode'],
   ['f-lot', 'lotNumber'],
   ['f-date', 'dataFabricacao'],
-  ['f-imei', 'imei']
+  ['f-imei', 'imei'],
+  ['f-linha', 'linha'],
+  ['f-internal', 'codigoInterno'],
+  ['f-anatel', 'anatel'],
+  ['f-icasa', 'icasa'],
+  ['f-fabricante', 'fabricante'],
+  ['f-endereco', 'endereco'],
+  ['f-origem', 'origem']
 ];
 
 function getExtraFieldsFromForm(){
@@ -838,15 +872,26 @@ function getExtraFieldsFromForm(){
   return out;
 }
 
+const EXTRA_FIELD_GROUPS = {
+  'extra-fields': ['f-linha', 'f-verification', 'f-material', 'f-lot', 'f-internal', 'f-date', 'f-imei'],
+  'extra-fields-2': ['f-anatel', 'f-icasa', 'f-fabricante', 'f-endereco', 'f-origem']
+};
+
 function setExtraFieldsInForm(entry){
-  const anySet = EXTRA_FIELD_MAP.some(([, key]) => entry && entry[key]);
   EXTRA_FIELD_MAP.forEach(([id, key]) => { $(id).value = (entry && entry[key]) || ''; });
-  $('extra-fields').open = anySet;
+  Object.entries(EXTRA_FIELD_GROUPS).forEach(([detailsId, ids]) => {
+    $(detailsId).open = ids.some(id => $(id).value.trim());
+  });
 }
 
 function clearExtraFields(){
   EXTRA_FIELD_MAP.forEach(([id]) => { $(id).value = ''; });
-  $('extra-fields').open = false;
+  Object.keys(EXTRA_FIELD_GROUPS).forEach(detailsId => { $(detailsId).open = false; });
+}
+
+function openGroupContaining(fieldId){
+  const groupId = Object.keys(EXTRA_FIELD_GROUPS).find(g => EXTRA_FIELD_GROUPS[g].includes(fieldId));
+  if(groupId) $(groupId).open = true;
 }
 
 // --- Full-label OCR (photo instead of just the barcode) ---
@@ -860,7 +905,14 @@ const LABEL_KEYS = [
   {label:'Material Code', key:'materialCode'},
   {label:'Lot Number', key:'lotNumber'},
   {label:'Date', key:'dataFabricacao'},
-  {label:'IMEI', key:'imei'}
+  {label:'IMEI', key:'imei'},
+  {label:'Anatel', key:'anatel'},
+  {label:'ICASA', key:'icasa'},
+  {label:'Manufacturer', key:'fabricante'},
+  {label:'Address', key:'endereco'},
+  // not a real field, just a boundary so "Address" doesn't swallow the
+  // "Made in ..." line that usually follows it on the label
+  {label:'Made in', key:'__originBoundary'}
 ];
 
 function extractLabelFields(text){
@@ -872,11 +924,16 @@ function extractLabelFields(text){
 
   const result = {};
   positions.forEach((cur, i) => {
+    if(cur.key === '__originBoundary') return;
     const next = positions[i + 1];
     let chunk = text.slice(cur.end, next ? next.index : text.length);
     chunk = chunk.split('\n')[0].replace(/^[:.\-\s]+/, '').trim();
     if(chunk) result[cur.key] = chunk;
   });
+
+  const originMatch = /Made\s+in\s+([A-Za-zÀ-ÿ]+(?:\s+[A-Za-zÀ-ÿ]+)*)/i.exec(text);
+  if(originMatch) result.origem = 'Made in ' + originMatch[1].trim();
+
   return result;
 }
 
@@ -921,7 +978,7 @@ function applyScanQueueItem(id, field){
   }else{
     const fieldIdMap = {verificationCode:'f-verification', materialCode:'f-material', lotNumber:'f-lot', imei:'f-imei'};
     const inputId = fieldIdMap[field];
-    if(inputId){ $(inputId).value = item.value; $('extra-fields').open = true; }
+    if(inputId){ $(inputId).value = item.value; openGroupContaining(inputId); }
   }
   scanQueue = scanQueue.filter(q => q.id !== id);
   renderScanQueue();
@@ -1018,9 +1075,8 @@ $('ocr-file-input').addEventListener('change', async (e) => {
         $('f-marca').value = fields.modelo;
       }
       EXTRA_FIELD_MAP.forEach(([id, key]) => {
-        if(fields[key]) $(id).value = fields[key];
+        if(fields[key]){ $(id).value = fields[key]; openGroupContaining(id); }
       });
-      if(EXTRA_FIELD_MAP.some(([, key]) => fields[key])) $('extra-fields').open = true;
       showToast('Etiqueta lida — confira os campos antes de salvar.');
     }
   }catch(err){
@@ -1137,9 +1193,9 @@ $('btn-export').addEventListener('click', () => {
     showToast('Nada para exportar ainda.');
     return;
   }
-  const header = 'Numero de Serie,Marca/Modelo,Local/Observacao,Verification Code,Material Code,Lot Number,Data Fabricacao,IMEI,Data Cadastro\n';
+  const header = 'Numero de Serie,Marca/Modelo,Linha,Local/Observacao,Verification Code,Material Code,Lot Number,Codigo Interno,Data Fabricacao,IMEI,Anatel,ICASA,Fabricante,Endereco,Origem,Data Cadastro\n';
   const rows = entries.map(e => {
-    const cells = [e.serial, e.marca, e.local, e.verificationCode, e.materialCode, e.lotNumber, e.dataFabricacao, e.imei, fmtTs(e.ts)].map(v => `"${(v||'').replace(/"/g,'""')}"`);
+    const cells = [e.serial, e.marca, e.linha, e.local, e.verificationCode, e.materialCode, e.lotNumber, e.codigoInterno, e.dataFabricacao, e.imei, e.anatel, e.icasa, e.fabricante, e.endereco, e.origem, fmtTs(e.ts)].map(v => `"${(v||'').replace(/"/g,'""')}"`);
     return cells.join(',');
   });
   const csv = header + rows.join('\n');
