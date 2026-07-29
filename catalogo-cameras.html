@@ -1048,6 +1048,77 @@ async function detectCodesInImage(file){
   }
 }
 
+// Primary, cross-browser (works on iOS Safari too, unlike BarcodeDetector)
+// barcode reading for the captured photo: Quagga only returns one result per
+// decode call, and a label can carry several distinct barcodes, so the photo
+// is sliced into overlapping horizontal bands and each is decoded separately.
+const QUAGGA_READERS = ['code_128_reader','ean_reader','ean_8_reader','code_39_reader','codabar_reader','upc_reader','upc_e_reader','code_93_reader','i2of5_reader'];
+
+function loadImageFromFile(file){
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = (e) => { URL.revokeObjectURL(url); reject(e); };
+    img.src = url;
+  });
+}
+
+function imageToDataUrl(img, sy, sh){
+  const canvas = document.createElement('canvas');
+  canvas.width = img.naturalWidth || img.width;
+  canvas.height = sh;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img, 0, sy, canvas.width, sh, 0, 0, canvas.width, sh);
+  return canvas.toDataURL('image/jpeg', 0.92);
+}
+
+function decodeSingleFromDataUrl(dataUrl){
+  return new Promise((resolve) => {
+    Quagga.decodeSingle({
+      src: dataUrl,
+      numOfWorkers: 0,
+      locate: true,
+      decoder: {readers: QUAGGA_READERS}
+    }, function(result){
+      const code = result && result.codeResult && result.codeResult.code;
+      resolve(code ? {value: code.trim().toUpperCase(), format: result.codeResult.format || 'barcode'} : null);
+    });
+  });
+}
+
+async function decodeBarcodesFromPhoto(file){
+  let img;
+  try{
+    img = await loadImageFromFile(file);
+  }catch(e){
+    return [];
+  }
+  const height = img.naturalHeight || img.height;
+  const bandCount = 6;
+  const step = height / bandCount;
+  const bandHeight = Math.min(height, step * 1.6); // overlap so a barcode straddling a cut still fits in the next band
+
+  const found = [];
+  const seen = new Set();
+  const tryDecode = async (dataUrl) => {
+    const result = await decodeSingleFromDataUrl(dataUrl);
+    if(result && !seen.has(result.value)){
+      seen.add(result.value);
+      found.push(result);
+    }
+  };
+
+  for(let i = 0; i < bandCount; i++){
+    const sy = Math.max(0, Math.min(height - bandHeight, i * step - (bandHeight - step) / 2));
+    await tryDecode(imageToDataUrl(img, sy, bandHeight));
+  }
+  // whole image too, in case a barcode is large enough to need the full frame
+  await tryDecode(imageToDataUrl(img, 0, height));
+
+  return found;
+}
+
 $('btn-ocr-photo').addEventListener('click', () => {
   $('ocr-file-input').value = '';
   $('ocr-file-input').click();
@@ -1058,13 +1129,21 @@ $('ocr-file-input').addEventListener('change', async (e) => {
   if(!file) return;
   const statusEl = $('ocr-status');
   statusEl.style.display = 'flex';
-  $('ocr-status-text').textContent = 'Lendo etiqueta…';
+  $('ocr-status-text').textContent = 'Lendo texto e códigos de barra da etiqueta…';
   try{
-    const [{ data }, codes] = await Promise.all([
+    const [{ data }, nativeCodes, quaggaCodes] = await Promise.all([
       Tesseract.recognize(file, 'eng'),
-      detectCodesInImage(file)
+      detectCodesInImage(file),
+      decodeBarcodesFromPhoto(file)
     ]);
     const fields = extractLabelFields(data.text);
+    const seen = new Set();
+    const codes = [];
+    [...quaggaCodes, ...nativeCodes].forEach(c => {
+      if(seen.has(c.value)) return;
+      seen.add(c.value);
+      codes.push(c);
+    });
     codes.forEach(c => addToScanQueue(c.value, c.format));
 
     if(Object.keys(fields).length === 0 && codes.length === 0){
@@ -1080,7 +1159,8 @@ $('ocr-file-input').addEventListener('change', async (e) => {
       EXTRA_FIELD_MAP.forEach(([id, key]) => {
         if(fields[key]){ $(id).value = fields[key]; openGroupContaining(id); }
       });
-      showToast('Etiqueta lida — confira os campos antes de salvar.');
+      const codeMsg = codes.length ? ` (${codes.length} código${codes.length > 1 ? 's' : ''} de barra encontrado${codes.length > 1 ? 's' : ''})` : '';
+      showToast('Etiqueta lida' + codeMsg + ' — confira antes de salvar.');
     }
   }catch(err){
     console.error(err);
@@ -1234,7 +1314,7 @@ function startScanner(){
     numOfWorkers: 0,
     frequency: 10,
     decoder:{
-      readers:['code_128_reader','ean_reader','ean_8_reader','code_39_reader','codabar_reader','upc_reader','upc_e_reader','code_93_reader','i2of5_reader']
+      readers: QUAGGA_READERS
     },
     locate:true
   }, function(err){
