@@ -1085,19 +1085,12 @@ function loadImageFromFile(file){
 // bright/dark the source photo already was, which is a likely reason
 // reading quality varied a lot between photos. Stretching each photo's own
 // actual brightness range to full black/white adapts to that automatically.
-// Also caps the working resolution: phone photos can be 4000px+ wide, which
-// is slower and outside the range Quagga's locator is tuned for; downscale
-// to something close to what the live scanner already uses successfully.
+// Kept at native resolution on purpose: downscaling was tried here and made
+// reading worse — small barcodes (e.g. the IMEI one) need every pixel of
+// bar width the original photo has, and shrinking the image blurs exactly
+// the detail the decoder depends on.
 function preprocessImage(img){
-  const MAX_DIM = 2000;
-  let w = img.width, h = img.height;
-  const longest = Math.max(w, h);
-  if(longest > MAX_DIM){
-    const scale = MAX_DIM / longest;
-    w = Math.round(w * scale);
-    h = Math.round(h * scale);
-  }
-
+  const w = img.width, h = img.height;
   const canvas = document.createElement('canvas');
   canvas.width = w;
   canvas.height = h;
