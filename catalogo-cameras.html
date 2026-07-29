@@ -11,7 +11,6 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 <style>
   :root{
     --bg:#12161B;
@@ -938,9 +937,9 @@ function extractLabelFields(text){
 }
 
 // --- Scanned-codes queue ---
-// A label can carry several distinct barcodes/QR codes (serial, material
-// code, IMEI, app QR, info QR...) with no reliable way to tell them apart
-// from the raw value alone. Instead of guessing wrong, every code read —
+// A label can carry several distinct barcodes (serial, material code,
+// lot number, IMEI...) with no reliable way to tell them apart from the
+// raw value alone. Instead of guessing wrong, every code read —
 // live or from a photo — lands here for the user to assign to a field.
 let scanQueue = [];
 
@@ -1028,13 +1027,17 @@ function renderScanQueue(){
 }
 
 // Best-effort: only Chrome/Android and a few others implement this; it can
-// return several barcodes/QR codes found in one still image in one call.
-// Silently skipped where unsupported (notably iOS Safari) — the live
-// scanner and OCR text extraction still work there.
+// return several barcodes found in one still image in one call. Restricted
+// to 1D barcode formats only (no QR) — silently skipped where unsupported
+// (notably iOS Safari), the live scanner and OCR text still work there.
+const BARCODE_FORMATS_1D = ['code_128', 'ean_13', 'ean_8', 'code_39', 'codabar', 'upc_a', 'upc_e', 'code_93', 'itf'];
+
 async function detectCodesInImage(file){
   if(!('BarcodeDetector' in window)) return [];
   try{
-    const formats = await BarcodeDetector.getSupportedFormats();
+    const supported = await BarcodeDetector.getSupportedFormats();
+    const formats = BARCODE_FORMATS_1D.filter(f => supported.includes(f));
+    if(formats.length === 0) return [];
     const detector = new BarcodeDetector({formats});
     const bitmap = await createImageBitmap(file);
     const codes = await detector.detect(bitmap);
@@ -1231,7 +1234,7 @@ function startScanner(){
     numOfWorkers: 0,
     frequency: 10,
     decoder:{
-      readers:['code_128_reader','ean_reader','ean_8_reader','code_39_reader','codabar_reader','upc_reader','upc_e_reader','code_93_reader']
+      readers:['code_128_reader','ean_reader','ean_8_reader','code_39_reader','codabar_reader','upc_reader','upc_e_reader','code_93_reader','i2of5_reader']
     },
     locate:true
   }, function(err){
@@ -1279,41 +1282,10 @@ function startScanner(){
     if(navigator.vibrate) navigator.vibrate(80);
     addToScanQueue(code, result.codeResult.format || 'barcode');
   });
-
-  startQrLoop();
-}
-
-// Quagga only decodes 1D barcodes; run jsQR on the same live video feed so
-// QR codes on the label (e.g. the app/info QR codes) get picked up too.
-let qrScanInterval = null;
-function startQrLoop(){
-  const video = $('scanner-container').querySelector('video');
-  if(!video) return;
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d', {willReadFrequently:true});
-  qrScanInterval = setInterval(() => {
-    if(!video.videoWidth) return;
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    let imageData;
-    try{
-      imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    }catch(e){ return; }
-    const code = jsQR(imageData.data, imageData.width, imageData.height);
-    if(code && code.data){
-      if(navigator.vibrate) navigator.vibrate(80);
-      addToScanQueue(code.data, 'qr_code');
-    }
-  }, 500);
-}
-function stopQrLoop(){
-  if(qrScanInterval){ clearInterval(qrScanInterval); qrScanInterval = null; }
 }
 
 function stopScanner(){
   try{ Quagga.stop(); }catch(e){}
-  stopQrLoop();
   scanning = false;
   $('scanner-off').style.display='flex';
   $('scanner-off').innerHTML = '<span>Câmera desligada</span>';
