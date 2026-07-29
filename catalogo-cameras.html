@@ -10,6 +10,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <style>
   :root{
     --bg:#12161B;
@@ -180,6 +181,44 @@
     color:var(--warn);
     display:none;
   }
+
+  .ocr-status{
+    margin-top:8px;
+    font-size:12px;
+    color:var(--text-dim);
+    display:none;
+    align-items:center;
+    gap:6px;
+  }
+  .ocr-spinner{
+    width:12px;height:12px;
+    border-radius:50%;
+    border:2px solid var(--text-faint);
+    border-top-color:var(--accent);
+    animation:spin 0.7s linear infinite;
+  }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+
+  details.extra-fields{
+    margin-top:14px;
+    border:1px solid var(--border);
+    border-radius:9px;
+    padding:0 12px;
+  }
+  details.extra-fields summary{
+    padding:11px 0;
+    font-size:12.5px;
+    color:var(--text-dim);
+    cursor:pointer;
+    user-select:none;
+  }
+  details.extra-fields[open] summary{
+    border-bottom:1px solid var(--border);
+    margin-bottom:4px;
+  }
+  details.extra-fields label{margin-top:10px;}
+  details.extra-fields > label:first-of-type{margin-top:0;}
+  details.extra-fields{margin-bottom:12px;}
 
   /* log / catalog */
   .log-empty{
@@ -408,9 +447,15 @@
         <button id="btn-torch" style="display:none;flex:0 0 auto;">🔦</button>
       </div>
 
+      <div class="btn-row">
+        <button id="btn-ocr-photo">📷 Ler etiqueta completa (foto)</button>
+      </div>
+      <input type="file" id="ocr-file-input" accept="image/*" capture="environment" style="display:none;">
+      <div class="ocr-status" id="ocr-status"><span class="ocr-spinner"></span><span id="ocr-status-text">Lendo etiqueta…</span></div>
+
       <label for="f-serial">Número de série</label>
-      <input type="text" id="f-serial" placeholder="Ex: G25A34567" maxlength="9">
-      <div class="duplicate-warn" id="format-warn">⚠ Formato esperado: G25A + 5 números (ex: G25A34567).</div>
+      <input type="text" id="f-serial" placeholder="Ex: G25A34567" maxlength="32">
+      <div class="duplicate-warn" id="format-warn">⚠ Fora do formato G25A + 5 números — confira se é esse mesmo o serial (ok se for outro modelo, ex: DashCam).</div>
       <div class="edit-banner" id="edit-banner">
         <span>Editando registro já catalogado</span>
         <button id="btn-cancel-edit" type="button">cancelar</button>
@@ -421,6 +466,24 @@
 
       <label for="f-local">Local / observação</label>
       <input type="text" id="f-local" placeholder="Ex: Poste Av. 15 de Novembro, esquina X">
+
+      <details class="extra-fields" id="extra-fields">
+        <summary>Mais dados da etiqueta (opcional)</summary>
+        <label for="f-verification">Verification Code</label>
+        <input type="text" id="f-verification" placeholder="Ex: PRJQOP">
+
+        <label for="f-material">Material Code</label>
+        <input type="text" id="f-material" placeholder="Ex: 307900723">
+
+        <label for="f-lot">Lot Number</label>
+        <input type="text" id="f-lot" placeholder="Ex: 26275411">
+
+        <label for="f-date">Data de fabricação</label>
+        <input type="text" id="f-date" placeholder="Ex: 06/2025">
+
+        <label for="f-imei">IMEI</label>
+        <input type="text" id="f-imei" placeholder="Ex: 866496078906506">
+      </details>
 
       <div class="btn-row">
         <button class="btn-accent" id="btn-save" style="flex:2;">Salvar no catálogo</button>
@@ -634,7 +697,8 @@ function render(filter){
   const q = (filter || $('search').value || '').trim().toLowerCase();
   const filtered = entries.filter(e => {
     if(!q) return true;
-    return (e.serial+' '+e.marca+' '+e.local).toLowerCase().includes(q);
+    const haystack = [e.serial, e.marca, e.local, e.lotNumber, e.imei, e.materialCode, e.verificationCode].filter(Boolean).join(' ');
+    return haystack.toLowerCase().includes(q);
   });
 
   $('total-count').textContent = entries.length;
@@ -652,11 +716,19 @@ function render(filter){
   log.innerHTML = sorted.map((e) => {
     const idx = entries.indexOf(e) + 1;
     const metaParts = [e.marca, e.local].filter(Boolean).join(' · ');
+    const extraParts = [
+      e.materialCode ? 'Material: ' + e.materialCode : '',
+      e.lotNumber ? 'Lote: ' + e.lotNumber : '',
+      e.verificationCode ? 'Verif: ' + e.verificationCode : '',
+      e.dataFabricacao ? 'Fab: ' + e.dataFabricacao : '',
+      e.imei ? 'IMEI: ' + e.imei : ''
+    ].filter(Boolean).join(' · ');
     return `<div class="entry" data-id="${e.id}">
       <div class="idx">#${String(idx).padStart(3,'0')}</div>
       <div>
         <div class="serial">${escapeHtml(e.serial)}</div>
         ${metaParts ? `<div class="meta">${escapeHtml(metaParts)}</div>` : ''}
+        ${extraParts ? `<div class="meta" style="color:var(--text-faint);font-size:11.5px;">${escapeHtml(extraParts)}</div>` : ''}
         <div class="ts">${fmtTs(e.ts)}${e.updatedTs ? ' · editado ' + fmtTs(e.updatedTs) : ''}</div>
       </div>
       <div style="display:flex;flex-direction:column;gap:6px;">
@@ -708,11 +780,108 @@ function findBySerial(serial){
   return entries.find(e => e.serial.toLowerCase() === val) || null;
 }
 
+// Extra label fields beyond the barcode serial (from OCR or manual entry)
+const EXTRA_FIELD_MAP = [
+  ['f-verification', 'verificationCode'],
+  ['f-material', 'materialCode'],
+  ['f-lot', 'lotNumber'],
+  ['f-date', 'dataFabricacao'],
+  ['f-imei', 'imei']
+];
+
+function getExtraFieldsFromForm(){
+  const out = {};
+  EXTRA_FIELD_MAP.forEach(([id, key]) => { out[key] = $(id).value.trim(); });
+  return out;
+}
+
+function setExtraFieldsInForm(entry){
+  const anySet = EXTRA_FIELD_MAP.some(([, key]) => entry && entry[key]);
+  EXTRA_FIELD_MAP.forEach(([id, key]) => { $(id).value = (entry && entry[key]) || ''; });
+  $('extra-fields').open = anySet;
+}
+
+function clearExtraFields(){
+  EXTRA_FIELD_MAP.forEach(([id]) => { $(id).value = ''; });
+  $('extra-fields').open = false;
+}
+
+// --- Full-label OCR (photo instead of just the barcode) ---
+// Finds each known label ("Serial No.", "IMEI", ...) in the raw OCR text and
+// takes whatever comes right after it, up to the next known label — more
+// resilient to OCR noise than trying to match each value's exact shape.
+const LABEL_KEYS = [
+  {label:'Model', key:'modelo'},
+  {label:'Serial No', key:'serial'},
+  {label:'Verification Code', key:'verificationCode'},
+  {label:'Material Code', key:'materialCode'},
+  {label:'Lot Number', key:'lotNumber'},
+  {label:'Date', key:'dataFabricacao'},
+  {label:'IMEI', key:'imei'}
+];
+
+function extractLabelFields(text){
+  const positions = LABEL_KEYS.map(({label, key}) => {
+    const re = new RegExp('\\b' + label.replace(/\s+/g, '\\s*') + '\\b', 'i');
+    const m = re.exec(text);
+    return m ? {key, index: m.index, end: m.index + m[0].length} : null;
+  }).filter(Boolean).sort((a, b) => a.index - b.index);
+
+  const result = {};
+  positions.forEach((cur, i) => {
+    const next = positions[i + 1];
+    let chunk = text.slice(cur.end, next ? next.index : text.length);
+    chunk = chunk.split('\n')[0].replace(/^[:.\-\s]+/, '').trim();
+    if(chunk) result[cur.key] = chunk;
+  });
+  return result;
+}
+
+$('btn-ocr-photo').addEventListener('click', () => {
+  $('ocr-file-input').value = '';
+  $('ocr-file-input').click();
+});
+
+$('ocr-file-input').addEventListener('change', async (e) => {
+  const file = e.target.files && e.target.files[0];
+  if(!file) return;
+  const statusEl = $('ocr-status');
+  statusEl.style.display = 'flex';
+  $('ocr-status-text').textContent = 'Lendo etiqueta…';
+  try{
+    const { data } = await Tesseract.recognize(file, 'eng');
+    const fields = extractLabelFields(data.text);
+    if(Object.keys(fields).length === 0){
+      showToast('Não consegui reconhecer os campos da etiqueta. Tente uma foto mais nítida.');
+    }else{
+      if(fields.serial){
+        $('f-serial').value = fields.serial.toUpperCase();
+        checkFormat();
+        syncFormWithSerial();
+      }
+      if(fields.modelo && !$('f-marca').value.trim()){
+        $('f-marca').value = fields.modelo;
+      }
+      EXTRA_FIELD_MAP.forEach(([id, key]) => {
+        if(fields[key]) $(id).value = fields[key];
+      });
+      $('extra-fields').open = true;
+      showToast('Etiqueta lida — confira os campos antes de salvar.');
+    }
+  }catch(err){
+    console.error(err);
+    showToast('Erro ao processar a foto da etiqueta.');
+  }finally{
+    statusEl.style.display = 'none';
+  }
+});
+
 function enterEditMode(entry){
   editingId = entry.id;
   $('f-serial').value = entry.serial;
   $('f-marca').value = entry.marca || '';
   $('f-local').value = entry.local || '';
+  setExtraFieldsInForm(entry);
   $('edit-banner').style.display = 'flex';
   $('btn-save').textContent = 'Atualizar registro';
 }
@@ -742,6 +911,7 @@ $('btn-cancel-edit').addEventListener('click', () => {
   $('f-serial').value = '';
   $('f-marca').value = '';
   $('f-local').value = '';
+  clearExtraFields();
 });
 
 $('btn-save').addEventListener('click', () => {
@@ -752,6 +922,7 @@ $('btn-save').addEventListener('click', () => {
   }
   const marca = $('f-marca').value.trim();
   const local = $('f-local').value.trim();
+  const extra = getExtraFieldsFromForm();
   let savedEntry;
 
   if(editingId){
@@ -760,6 +931,7 @@ $('btn-save').addEventListener('click', () => {
       entry.serial = serial;
       entry.marca = marca;
       entry.local = local;
+      Object.assign(entry, extra);
       entry.updatedTs = new Date().toISOString();
       savedEntry = entry;
     }
@@ -770,6 +942,7 @@ $('btn-save').addEventListener('click', () => {
       // safety net: serial matched an existing record without triggering sync
       existing.marca = marca || existing.marca;
       existing.local = local || existing.local;
+      Object.assign(existing, extra);
       existing.updatedTs = new Date().toISOString();
       savedEntry = existing;
       showToast('Já existia — registro atualizado.');
@@ -777,6 +950,7 @@ $('btn-save').addEventListener('click', () => {
       savedEntry = {
         id: Date.now().toString(36) + Math.random().toString(36).slice(2,7),
         serial, marca, local,
+        ...extra,
         ts: new Date().toISOString()
       };
       entries.push(savedEntry);
@@ -788,6 +962,7 @@ $('btn-save').addEventListener('click', () => {
   $('f-serial').value = '';
   $('f-marca').value = '';
   $('f-local').value = '';
+  clearExtraFields();
   $('format-warn').style.display = 'none';
   render();
   if(savedEntry) saveEntryRemote(savedEntry);
@@ -798,6 +973,7 @@ $('btn-clear').addEventListener('click', () => {
   $('f-serial').value = '';
   $('f-marca').value = '';
   $('f-local').value = '';
+  clearExtraFields();
   $('format-warn').style.display = 'none';
 });
 
@@ -808,9 +984,9 @@ $('btn-export').addEventListener('click', () => {
     showToast('Nada para exportar ainda.');
     return;
   }
-  const header = 'Numero de Serie,Marca/Modelo,Local/Observacao,Data\n';
+  const header = 'Numero de Serie,Marca/Modelo,Local/Observacao,Verification Code,Material Code,Lot Number,Data Fabricacao,IMEI,Data Cadastro\n';
   const rows = entries.map(e => {
-    const cells = [e.serial, e.marca, e.local, fmtTs(e.ts)].map(v => `"${(v||'').replace(/"/g,'""')}"`);
+    const cells = [e.serial, e.marca, e.local, e.verificationCode, e.materialCode, e.lotNumber, e.dataFabricacao, e.imei, fmtTs(e.ts)].map(v => `"${(v||'').replace(/"/g,'""')}"`);
     return cells.join(',');
   });
   const csv = header + rows.join('\n');
