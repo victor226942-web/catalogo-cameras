@@ -962,6 +962,29 @@ function addToScanQueue(value, format){
   renderScanQueue();
 }
 
+// Single source of truth for "which form field does this key fill" and its
+// label in the scan-queue dropdown — generated from EXTRA_FIELD_MAP so a
+// newly added label field automatically becomes assignable here too.
+const FIELD_LABELS = [
+  ['serial', 'Número de Série'],
+  ['marca', 'Marca / Modelo'],
+  ['linha', 'Linha do produto'],
+  ['verificationCode', 'Verification Code'],
+  ['materialCode', 'Material Code'],
+  ['lotNumber', 'Lot Number'],
+  ['codigoInterno', 'Código Interno'],
+  ['imei', 'IMEI'],
+  ['anatel', 'Anatel'],
+  ['icasa', 'ICASA'],
+  ['fabricante', 'Fabricante'],
+  ['endereco', 'Endereço'],
+  ['origem', 'Origem']
+];
+const FIELD_ID_MAP = Object.assign(
+  {serial: 'f-serial', marca: 'f-marca'},
+  Object.fromEntries(EXTRA_FIELD_MAP.map(([id, key]) => [key, id]))
+);
+
 function applyScanQueueItem(id, field){
   const item = scanQueue.find(q => q.id === id);
   if(!item) return;
@@ -969,16 +992,11 @@ function applyScanQueueItem(id, field){
     showToast('Escolha o campo antes de usar.');
     return;
   }
-  if(field === 'serial'){
-    $('f-serial').value = item.value.toUpperCase();
-    syncFormWithSerial();
-  }else if(field === 'marca'){
-    $('f-marca').value = item.value;
-  }else{
-    const fieldIdMap = {verificationCode:'f-verification', materialCode:'f-material', lotNumber:'f-lot', imei:'f-imei'};
-    const inputId = fieldIdMap[field];
-    if(inputId){ $(inputId).value = item.value; openGroupContaining(inputId); }
-  }
+  const inputId = FIELD_ID_MAP[field];
+  if(!inputId) return;
+  $(inputId).value = field === 'serial' ? item.value.toUpperCase() : item.value;
+  if(field === 'serial') syncFormWithSerial();
+  else openGroupContaining(inputId);
   scanQueue = scanQueue.filter(q => q.id !== id);
   renderScanQueue();
   showToast('Aplicado ao campo.');
@@ -993,18 +1011,16 @@ function renderScanQueue(){
     return;
   }
   panel.style.display = 'block';
+  const optionsHtml = (guess) => FIELD_LABELS.map(([key, label]) =>
+    `<option value="${key}" ${guess === key ? 'selected' : ''}>${escapeHtml(label)}</option>`
+  ).join('');
   list.innerHTML = scanQueue.map(item => `
     <div class="scan-queue-item">
       <div class="sqi-value">${escapeHtml(item.value)}</div>
       <div class="sqi-format">${escapeHtml(item.format)}</div>
       <select data-id="${item.id}">
         <option value="">Ignorar</option>
-        <option value="serial" ${item.guess === 'serial' ? 'selected' : ''}>Número de Série</option>
-        <option value="marca">Marca / Modelo</option>
-        <option value="verificationCode">Verification Code</option>
-        <option value="materialCode">Material Code</option>
-        <option value="lotNumber">Lot Number</option>
-        <option value="imei" ${item.guess === 'imei' ? 'selected' : ''}>IMEI</option>
+        ${optionsHtml(item.guess)}
       </select>
       <button class="sqi-apply" data-id="${item.id}">usar</button>
       <button class="sqi-remove" data-id="${item.id}">×</button>
@@ -1235,12 +1251,18 @@ function syncFormWithSerial(){
 
 $('f-serial').addEventListener('input', syncFormWithSerial);
 
+function clearScanQueue(){
+  scanQueue = [];
+  renderScanQueue();
+}
+
 $('btn-cancel-edit').addEventListener('click', () => {
   exitEditMode();
   $('f-serial').value = '';
   $('f-marca').value = '';
   $('f-local').value = '';
   clearExtraFields();
+  clearScanQueue();
 });
 
 $('btn-save').addEventListener('click', () => {
@@ -1292,6 +1314,7 @@ $('btn-save').addEventListener('click', () => {
   $('f-marca').value = '';
   $('f-local').value = '';
   clearExtraFields();
+  clearScanQueue();
   render();
   if(savedEntry) saveEntryRemote(savedEntry);
 });
@@ -1302,6 +1325,7 @@ $('btn-clear').addEventListener('click', () => {
   $('f-marca').value = '';
   $('f-local').value = '';
   clearExtraFields();
+  clearScanQueue();
 });
 
 $('search').addEventListener('input', () => render());
