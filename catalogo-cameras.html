@@ -7,6 +7,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <style>
   :root{
     --bg:#12161B;
@@ -439,7 +442,6 @@
 <div class="toast" id="toast"></div>
 
 <script>
-const STORAGE_KEY = 'cameras-catalog-v1';
 let entries = [];
 let scanning = false;
 let lastDetectedCode = '';
@@ -454,33 +456,31 @@ function showToast(msg){
   setTimeout(()=>t.classList.remove('show'), 1800);
 }
 
-// --- PIN lock ---
-// Client-side only: keeps a casual person picking up the phone or link out.
-// It's not real security — a technically capable person could read the
-// source and localStorage directly. Good enough to stop "anyone" from
-// opening or editing the catalog, not a determined attacker.
-const PIN_KEY = 'cameras-catalog-pin-v1';
+// --- Firebase: real auth + realtime sync ---
+// Security now lives server-side: Firestore rejects any read/write from a
+// session that isn't signed in — enforced by Firestore security rules on
+// Google's servers, not by this page. This page only triggers sign-in;
+// the apiKey below is a public app identifier, not a secret.
+const firebaseConfig = {
+  apiKey: "AIzaSyA-FfKchsBv_swb67iujzox0XSJKt03mMM",
+  authDomain: "catalogo-bb70e.firebaseapp.com",
+  projectId: "catalogo-bb70e",
+  storageBucket: "catalogo-bb70e.firebasestorage.app",
+  messagingSenderId: "8230181188",
+  appId: "1:8230181188:web:b3fe281abe3b19f298df11"
+};
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+db.enablePersistence({synchronizeTabs:true}).catch(()=>{});
+const entriesCol = db.collection('entries');
 
-async function sha256(text){
-  const enc = new TextEncoder().encode(text);
-  const buf = await crypto.subtle.digest('SHA-256', enc);
-  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
-}
+// Shared login used by everyone who knows the password — not a personal
+// account, just how Firebase Auth verifies "someone who knows the password".
+const SHARED_EMAIL = 'equipe@catalogo-cameras.local';
 
-let lockMode = 'enter'; // 'setup' | 'enter' | 'change-verify' | 'change-new'
-let storedPinHash = null;
-
-function getStoredPinHash(){
-  return localStorage.getItem(PIN_KEY) || null;
-}
-
-function setStoredPinHash(hash){
-  if(hash){
-    localStorage.setItem(PIN_KEY, hash);
-  }else{
-    localStorage.removeItem(PIN_KEY);
-  }
-}
+let lockMode = 'enter'; // 'enter' | 'change-verify' | 'change-new'
+let unsubscribeEntries = null;
 
 function showLockOverlay(){
   $('lock-overlay').style.display = 'flex';
@@ -492,13 +492,7 @@ function hideLockOverlay(){
 
 function renderLockUI(){
   const confirmField = $('pin-input-confirm');
-  if(lockMode === 'setup'){
-    $('lock-title').textContent = 'Criar uma senha';
-    $('lock-sub').textContent = 'Só quem souber essa senha vai poder abrir e editar o catálogo. Escolha algo único, com letras e números.';
-    confirmField.style.display = 'block';
-    confirmField.placeholder = 'confirme a senha';
-    $('btn-lock-submit').textContent = 'Criar senha';
-  }else if(lockMode === 'enter'){
+  if(lockMode === 'enter'){
     $('lock-title').textContent = 'Catálogo protegido';
     $('lock-sub').textContent = 'Digite a senha para continuar.';
     confirmField.style.display = 'none';
@@ -510,7 +504,7 @@ function renderLockUI(){
     $('btn-lock-submit').textContent = 'Continuar';
   }else if(lockMode === 'change-new'){
     $('lock-title').textContent = 'Nova senha';
-    $('lock-sub').textContent = 'Digite a nova senha e confirme.';
+    $('lock-sub').textContent = 'Digite a nova senha e confirme (mín. 6 caracteres).';
     confirmField.style.display = 'block';
     confirmField.placeholder = 'confirme a nova senha';
     $('btn-lock-submit').textContent = 'Salvar nova senha';
@@ -521,49 +515,58 @@ function renderLockUI(){
   $('btn-forgot').style.display = (lockMode === 'enter') ? 'inline-block' : 'none';
   setTimeout(()=>$('pin-input').focus(), 50);
 }
+renderLockUI();
 
-function initLock(){
-  storedPinHash = getStoredPinHash();
-  lockMode = storedPinHash ? 'enter' : 'setup';
-  renderLockUI();
-  showLockOverlay();
+function attachEntriesListener(){
+  if(unsubscribeEntries) return;
+  unsubscribeEntries = entriesCol.onSnapshot(snapshot => {
+    entries = snapshot.docs.map(d => ({id: d.id, ...d.data()}));
+    render();
+  }, err => {
+    console.error(err);
+    showToast('Erro ao sincronizar com o catálogo.');
+  });
 }
+
+function detachEntriesListener(){
+  if(unsubscribeEntries){ unsubscribeEntries(); unsubscribeEntries = null; }
+  entries = [];
+  render();
+}
+
+auth.onAuthStateChanged(user => {
+  if(user){
+    hideLockOverlay();
+    attachEntriesListener();
+  }else{
+    detachEntriesListener();
+    lockMode = 'enter';
+    renderLockUI();
+    showLockOverlay();
+  }
+});
 
 $('btn-lock-submit').addEventListener('click', async () => {
   const val = $('pin-input').value.trim();
   const confirmVal = $('pin-input-confirm').value.trim();
   const err = $('lock-error');
 
-  if(lockMode === 'setup'){
-    if(val.length < 6){
-      err.textContent = 'A senha precisa ter pelo menos 6 caracteres.';
-      return;
-    }
-    if(val !== confirmVal){
-      err.textContent = 'As senhas não coincidem.';
-      return;
-    }
-    storedPinHash = await sha256(val);
-    setStoredPinHash(storedPinHash);
-    hideLockOverlay();
-    loadEntries();
-  }else if(lockMode === 'enter'){
-    const h = await sha256(val);
-    if(h !== storedPinHash){
+  if(lockMode === 'enter'){
+    if(!val){ err.textContent = 'Digite a senha.'; return; }
+    try{
+      await auth.signInWithEmailAndPassword(SHARED_EMAIL, val);
+    }catch(e){
       err.textContent = 'Senha incorreta.';
       $('pin-input').value = '';
-      return;
     }
-    hideLockOverlay();
-    loadEntries();
   }else if(lockMode === 'change-verify'){
-    const h = await sha256(val);
-    if(h !== storedPinHash){
+    try{
+      await auth.signInWithEmailAndPassword(SHARED_EMAIL, val);
+      lockMode = 'change-new';
+      renderLockUI();
+    }catch(e){
       err.textContent = 'Senha atual incorreta.';
-      return;
     }
-    lockMode = 'change-new';
-    renderLockUI();
   }else if(lockMode === 'change-new'){
     if(val.length < 6){
       err.textContent = 'A senha precisa ter pelo menos 6 caracteres.';
@@ -573,10 +576,13 @@ $('btn-lock-submit').addEventListener('click', async () => {
       err.textContent = 'As senhas não coincidem.';
       return;
     }
-    storedPinHash = await sha256(val);
-    setStoredPinHash(storedPinHash);
-    hideLockOverlay();
-    showToast('Senha atualizada.');
+    try{
+      await auth.currentUser.updatePassword(val);
+      lockMode = 'enter';
+      showToast('Senha atualizada.');
+    }catch(e){
+      err.textContent = 'Não foi possível trocar a senha. Saia e entre de novo, depois tente outra vez.';
+    }
   }
 });
 
@@ -587,17 +593,11 @@ $('btn-lock-submit').addEventListener('click', async () => {
 });
 
 $('btn-forgot').addEventListener('click', () => {
-  if(!confirm('Isso vai apagar a senha atual e você poderá criar uma nova. O catálogo salvo não será apagado. Continuar?')) return;
-  setStoredPinHash(null);
-  storedPinHash = null;
-  lockMode = 'setup';
-  renderLockUI();
+  alert('A senha é compartilhada entre quem tem acesso ao catálogo. Se ninguém mais lembra dela, quem administra o projeto Firebase precisa redefinir manualmente pelo console.');
 });
 
 $('btn-relock').addEventListener('click', () => {
-  lockMode = 'enter';
-  renderLockUI();
-  showLockOverlay();
+  auth.signOut();
 });
 
 $('btn-change-pin').addEventListener('click', () => {
@@ -606,21 +606,21 @@ $('btn-change-pin').addEventListener('click', () => {
   showLockOverlay();
 });
 
-function loadEntries(){
+async function saveEntryRemote(entry){
   try{
-    const raw = localStorage.getItem(STORAGE_KEY);
-    entries = raw ? JSON.parse(raw) : [];
+    await entriesCol.doc(entry.id).set(entry);
   }catch(e){
-    entries = [];
+    console.error(e);
+    showToast('Erro ao salvar. Tente novamente.');
   }
-  render();
 }
 
-function persistEntries(){
+async function deleteEntryRemote(id){
   try{
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+    await entriesCol.doc(id).delete();
   }catch(e){
-    showToast('Erro ao salvar. Tente novamente.');
+    console.error(e);
+    showToast('Erro ao remover. Tente novamente.');
   }
 }
 
@@ -671,8 +671,8 @@ function render(filter){
       const id = btn.getAttribute('data-id');
       entries = entries.filter(e => e.id !== id);
       if(editingId === id) exitEditMode();
-      persistEntries();
       render();
+      deleteEntryRemote(id);
     });
   });
 
@@ -752,6 +752,7 @@ $('btn-save').addEventListener('click', () => {
   }
   const marca = $('f-marca').value.trim();
   const local = $('f-local').value.trim();
+  let savedEntry;
 
   if(editingId){
     const entry = entries.find(e => e.id === editingId);
@@ -760,6 +761,7 @@ $('btn-save').addEventListener('click', () => {
       entry.marca = marca;
       entry.local = local;
       entry.updatedTs = new Date().toISOString();
+      savedEntry = entry;
     }
     showToast('Registro atualizado.');
   }else{
@@ -769,24 +771,26 @@ $('btn-save').addEventListener('click', () => {
       existing.marca = marca || existing.marca;
       existing.local = local || existing.local;
       existing.updatedTs = new Date().toISOString();
+      savedEntry = existing;
       showToast('Já existia — registro atualizado.');
     }else{
-      entries.push({
+      savedEntry = {
         id: Date.now().toString(36) + Math.random().toString(36).slice(2,7),
         serial, marca, local,
         ts: new Date().toISOString()
-      });
+      };
+      entries.push(savedEntry);
       showToast('Câmera salva no catálogo.');
     }
   }
 
-  persistEntries();
   exitEditMode();
   $('f-serial').value = '';
   $('f-marca').value = '';
   $('f-local').value = '';
   $('format-warn').style.display = 'none';
   render();
+  if(savedEntry) saveEntryRemote(savedEntry);
 });
 
 $('btn-clear').addEventListener('click', () => {
@@ -958,8 +962,6 @@ $('btn-toggle-scan').addEventListener('click', () => {
   if(scanning) stopScanner();
   else startScanner();
 });
-
-initLock();
 </script>
 </body>
 </html>
