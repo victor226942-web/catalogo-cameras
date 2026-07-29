@@ -11,6 +11,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 <style>
   :root{
     --bg:#12161B;
@@ -180,6 +181,54 @@
     font-size:12px;
     color:var(--warn);
     display:none;
+  }
+
+  #scan-queue-panel{
+    display:none;
+    margin-top:10px;
+    background:var(--panel-raised);
+    border:1px solid var(--border);
+    border-radius:9px;
+    padding:10px;
+  }
+  #scan-queue-panel .sqp-title{
+    font-size:11.5px;
+    color:var(--text-dim);
+    margin-bottom:8px;
+  }
+  .scan-queue-item{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    flex-wrap:wrap;
+    padding:7px 0;
+    border-top:1px solid var(--border);
+  }
+  .scan-queue-item:first-child{border-top:none;}
+  .scan-queue-item .sqi-value{
+    font-family:'JetBrains Mono',monospace;
+    font-size:13px;
+    color:var(--accent);
+    flex:1 1 auto;
+    min-width:90px;
+    word-break:break-all;
+  }
+  .scan-queue-item .sqi-format{
+    font-size:10.5px;
+    color:var(--text-faint);
+    flex:0 0 auto;
+  }
+  .scan-queue-item select{
+    font-size:12px;
+    background:var(--panel);
+    color:var(--text);
+    border:1px solid var(--border);
+    border-radius:6px;
+    padding:5px 6px;
+  }
+  .scan-queue-item button{
+    font-size:11px;
+    padding:5px 8px;
   }
 
   .ocr-status{
@@ -453,9 +502,13 @@
       <input type="file" id="ocr-file-input" accept="image/*" capture="environment" style="display:none;">
       <div class="ocr-status" id="ocr-status"><span class="ocr-spinner"></span><span id="ocr-status-text">Lendo etiqueta…</span></div>
 
+      <div id="scan-queue-panel">
+        <div class="sqp-title">Códigos lidos nesta sessão — escolha o campo de cada um e toque em "usar":</div>
+        <div id="scan-queue-list"></div>
+      </div>
+
       <label for="f-serial">Número de série</label>
-      <input type="text" id="f-serial" placeholder="Ex: G25A34567" maxlength="32">
-      <div class="duplicate-warn" id="format-warn">⚠ Fora do formato G25A + 5 números — confira se é esse mesmo o serial (ok se for outro modelo, ex: DashCam).</div>
+      <input type="text" id="f-serial" placeholder="Ex: G25A34567 ou CF9662197" maxlength="32">
       <div class="edit-banner" id="edit-banner">
         <span>Editando registro já catalogado</span>
         <button id="btn-cancel-edit" type="button">cancelar</button>
@@ -762,16 +815,6 @@ function escapeHtml(s){
   return (s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
-// Serial format: fixed "G25A" prefix + 5 digits that vary (e.g. G25A34567)
-const SERIAL_FORMAT = /^G25A\d{5}$/i;
-
-function checkFormat(){
-  const val = $('f-serial').value.trim();
-  const bad = val && !SERIAL_FORMAT.test(val);
-  $('format-warn').style.display = bad ? 'block' : 'none';
-  return !bad;
-}
-
 let editingId = null;
 
 function findBySerial(serial){
@@ -837,6 +880,114 @@ function extractLabelFields(text){
   return result;
 }
 
+// --- Scanned-codes queue ---
+// A label can carry several distinct barcodes/QR codes (serial, material
+// code, IMEI, app QR, info QR...) with no reliable way to tell them apart
+// from the raw value alone. Instead of guessing wrong, every code read —
+// live or from a photo — lands here for the user to assign to a field.
+let scanQueue = [];
+
+function guessFieldForCode(value){
+  const v = value.trim();
+  if(/^\d{14,17}$/.test(v)) return 'imei';
+  if(/[A-Za-z]/.test(v) && /\d/.test(v)) return 'serial';
+  return '';
+}
+
+function addToScanQueue(value, format){
+  const v = (value || '').trim();
+  if(!v || scanQueue.some(q => q.value === v)) return;
+  scanQueue.push({
+    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+    value: v,
+    format: format || '',
+    guess: guessFieldForCode(v)
+  });
+  renderScanQueue();
+}
+
+function applyScanQueueItem(id, field){
+  const item = scanQueue.find(q => q.id === id);
+  if(!item) return;
+  if(!field){
+    showToast('Escolha o campo antes de usar.');
+    return;
+  }
+  if(field === 'serial'){
+    $('f-serial').value = item.value.toUpperCase();
+    syncFormWithSerial();
+  }else if(field === 'marca'){
+    $('f-marca').value = item.value;
+  }else{
+    const fieldIdMap = {verificationCode:'f-verification', materialCode:'f-material', lotNumber:'f-lot', imei:'f-imei'};
+    const inputId = fieldIdMap[field];
+    if(inputId){ $(inputId).value = item.value; $('extra-fields').open = true; }
+  }
+  scanQueue = scanQueue.filter(q => q.id !== id);
+  renderScanQueue();
+  showToast('Aplicado ao campo.');
+}
+
+function renderScanQueue(){
+  const panel = $('scan-queue-panel');
+  const list = $('scan-queue-list');
+  if(scanQueue.length === 0){
+    panel.style.display = 'none';
+    list.innerHTML = '';
+    return;
+  }
+  panel.style.display = 'block';
+  list.innerHTML = scanQueue.map(item => `
+    <div class="scan-queue-item">
+      <div class="sqi-value">${escapeHtml(item.value)}</div>
+      <div class="sqi-format">${escapeHtml(item.format)}</div>
+      <select data-id="${item.id}">
+        <option value="">Ignorar</option>
+        <option value="serial" ${item.guess === 'serial' ? 'selected' : ''}>Número de Série</option>
+        <option value="marca">Marca / Modelo</option>
+        <option value="verificationCode">Verification Code</option>
+        <option value="materialCode">Material Code</option>
+        <option value="lotNumber">Lot Number</option>
+        <option value="imei" ${item.guess === 'imei' ? 'selected' : ''}>IMEI</option>
+      </select>
+      <button class="sqi-apply" data-id="${item.id}">usar</button>
+      <button class="sqi-remove" data-id="${item.id}">×</button>
+    </div>
+  `).join('');
+  list.querySelectorAll('.sqi-apply').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-id');
+      const select = list.querySelector(`select[data-id="${id}"]`);
+      applyScanQueueItem(id, select.value);
+    });
+  });
+  list.querySelectorAll('.sqi-remove').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-id');
+      scanQueue = scanQueue.filter(q => q.id !== id);
+      renderScanQueue();
+    });
+  });
+}
+
+// Best-effort: only Chrome/Android and a few others implement this; it can
+// return several barcodes/QR codes found in one still image in one call.
+// Silently skipped where unsupported (notably iOS Safari) — the live
+// scanner and OCR text extraction still work there.
+async function detectCodesInImage(file){
+  if(!('BarcodeDetector' in window)) return [];
+  try{
+    const formats = await BarcodeDetector.getSupportedFormats();
+    const detector = new BarcodeDetector({formats});
+    const bitmap = await createImageBitmap(file);
+    const codes = await detector.detect(bitmap);
+    return codes.map(c => ({value: c.rawValue, format: c.format}));
+  }catch(e){
+    console.error(e);
+    return [];
+  }
+}
+
 $('btn-ocr-photo').addEventListener('click', () => {
   $('ocr-file-input').value = '';
   $('ocr-file-input').click();
@@ -849,14 +1000,18 @@ $('ocr-file-input').addEventListener('change', async (e) => {
   statusEl.style.display = 'flex';
   $('ocr-status-text').textContent = 'Lendo etiqueta…';
   try{
-    const { data } = await Tesseract.recognize(file, 'eng');
+    const [{ data }, codes] = await Promise.all([
+      Tesseract.recognize(file, 'eng'),
+      detectCodesInImage(file)
+    ]);
     const fields = extractLabelFields(data.text);
-    if(Object.keys(fields).length === 0){
-      showToast('Não consegui reconhecer os campos da etiqueta. Tente uma foto mais nítida.');
+    codes.forEach(c => addToScanQueue(c.value, c.format));
+
+    if(Object.keys(fields).length === 0 && codes.length === 0){
+      showToast('Não consegui reconhecer nada na etiqueta. Tente uma foto mais nítida.');
     }else{
       if(fields.serial){
         $('f-serial').value = fields.serial.toUpperCase();
-        checkFormat();
         syncFormWithSerial();
       }
       if(fields.modelo && !$('f-marca').value.trim()){
@@ -865,7 +1020,7 @@ $('ocr-file-input').addEventListener('change', async (e) => {
       EXTRA_FIELD_MAP.forEach(([id, key]) => {
         if(fields[key]) $(id).value = fields[key];
       });
-      $('extra-fields').open = true;
+      if(EXTRA_FIELD_MAP.some(([, key]) => fields[key])) $('extra-fields').open = true;
       showToast('Etiqueta lida — confira os campos antes de salvar.');
     }
   }catch(err){
@@ -904,7 +1059,7 @@ function syncFormWithSerial(){
   }
 }
 
-$('f-serial').addEventListener('input', () => { checkFormat(); syncFormWithSerial(); });
+$('f-serial').addEventListener('input', syncFormWithSerial);
 
 $('btn-cancel-edit').addEventListener('click', () => {
   exitEditMode();
@@ -963,7 +1118,6 @@ $('btn-save').addEventListener('click', () => {
   $('f-marca').value = '';
   $('f-local').value = '';
   clearExtraFields();
-  $('format-warn').style.display = 'none';
   render();
   if(savedEntry) saveEntryRemote(savedEntry);
 });
@@ -974,7 +1128,6 @@ $('btn-clear').addEventListener('click', () => {
   $('f-marca').value = '';
   $('f-local').value = '';
   clearExtraFields();
-  $('format-warn').style.display = 'none';
 });
 
 $('search').addEventListener('input', () => render());
@@ -1063,24 +1216,48 @@ function startScanner(){
     if(!raw) return;
     const code = raw.trim().toUpperCase();
     const now = Date.now();
-    // debounce repeated reads of the same code (accepted or rejected)
+    // debounce repeated reads of the same code (avoid re-buzzing every frame)
     if(code === lastDetectedCode && (now - lastDetectedTime) < 2000) return;
     lastDetectedCode = code;
     lastDetectedTime = now;
-    // reject reads that don't match the known serial format (G25A + 5 digits) —
-    // a garbled 1D decode is a much more likely explanation than a real serial
-    // outside the expected pattern, so drop it instead of polluting the field
-    if(!SERIAL_FORMAT.test(code)) return;
-    $('f-serial').value = code;
-    checkFormat();
-    syncFormWithSerial();
     if(navigator.vibrate) navigator.vibrate(80);
-    showToast(findBySerial(code) ? 'Já catalogada — editando: ' + code : 'Código lido: ' + code);
+    addToScanQueue(code, result.codeResult.format || 'barcode');
   });
+
+  startQrLoop();
+}
+
+// Quagga only decodes 1D barcodes; run jsQR on the same live video feed so
+// QR codes on the label (e.g. the app/info QR codes) get picked up too.
+let qrScanInterval = null;
+function startQrLoop(){
+  const video = $('scanner-container').querySelector('video');
+  if(!video) return;
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d', {willReadFrequently:true});
+  qrScanInterval = setInterval(() => {
+    if(!video.videoWidth) return;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    let imageData;
+    try{
+      imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    }catch(e){ return; }
+    const code = jsQR(imageData.data, imageData.width, imageData.height);
+    if(code && code.data){
+      if(navigator.vibrate) navigator.vibrate(80);
+      addToScanQueue(code.data, 'qr_code');
+    }
+  }, 500);
+}
+function stopQrLoop(){
+  if(qrScanInterval){ clearInterval(qrScanInterval); qrScanInterval = null; }
 }
 
 function stopScanner(){
   try{ Quagga.stop(); }catch(e){}
+  stopQrLoop();
   scanning = false;
   $('scanner-off').style.display='flex';
   $('scanner-off').innerHTML = '<span>Câmera desligada</span>';
